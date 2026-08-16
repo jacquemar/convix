@@ -149,6 +149,30 @@ export class FrankfurterClient {
     startDate: string,
     endDate: string
   ): Promise<Rate[]> {
+    // Validation des dates
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(startDate) || !dateRegex.test(endDate)) {
+      throw new Error('Format de date invalide. Utilisez YYYY-MM-DD.');
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const now = new Date();
+
+    if (start > end) {
+      throw new Error('La date de début doit être antérieure à la date de fin.');
+    }
+
+    if (start > now) {
+      throw new Error('La date de début ne peut pas être dans le futur.');
+    }
+
+    // Limiter la période à 1 an (366 jours pour inclure les années bissextiles)
+    const maxPeriod = 366 * 24 * 60 * 60 * 1000;
+    if (end.getTime() - start.getTime() > maxPeriod) {
+      throw new Error('La période ne peut pas dépasser 1 an.');
+    }
+
     const cacheKey = this.getCacheKey(`${startDate}..${endDate}`, { from: base, to: quote });
     const cached = this.cache.get(cacheKey);
     if (cached && this.isCacheValid(cached.timestamp)) {
