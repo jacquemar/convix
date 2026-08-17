@@ -1,0 +1,9 @@
+{
+  "columns": [
+    {"name": "Backlog", "issues": []},
+    {"name": "Ready for Dev", "issues": []},
+    {"name": "In Progress", "issues": []},
+    {"name": "Ready for Review", "issues": []},
+    {"name": "Done", "issues": []}
+  ]
+}
