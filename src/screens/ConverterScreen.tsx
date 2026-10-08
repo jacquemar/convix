@@ -1,429 +1,143 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  StyleSheet,
-  TouchableOpacity,
-  ActivityIndicator,
-  Alert,
-  Platform,
-  Keyboard,
-  ScrollView,
-  SafeAreaView,
-} from 'react-native';
-import { useColorScheme } from 'react-native';
-import { currencyService } from '../services/currency.service';
-import { Currency, SUPPORTED_CURRENCIES } from '../types/currency';
-import { CurrencySelector } from '../components/CurrencySelector';
-import { SwapButton } from '../components/SwapButton';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ScrollView, View, type LayoutChangeEvent } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AppHeader, Button, Chip, ConversionPair, HeroCard, Keypad, RateChip } from '../components/ui';
+import { FocusStatusBar } from '../components/FocusStatusBar';
+import { CurrencyPicker } from '../components/CurrencyPicker';
+import { getCurrency } from '../data/currencies';
+import { useRateInfo } from '../hooks/useRateInfo';
+import { pair, usePair, type Side } from '../services/my-currencies';
+import { radius, size, space, useTheme } from '../theme';
+import { applyKey, formatRate, formatTime, parseRaw, toRaw, type KeypadKey } from '../utils/amount';
+import type { RateInfo } from '../types/currency';
+import { fr } from '../i18n/fr';
 
-interface ConverterScreenProps {
-  navigation?: any;
-}
+/** Le clavier chevauche le bas du hero (README : « environ 92px »). */
+const KEYPAD_OVERLAP = 92;
+const MIN_KEY = 52;
 
-export const ConverterScreen: React.FC<ConverterScreenProps> = ({ navigation }) => {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
-  
-  const [amount, setAmount] = useState<string>('');
-  const [sourceCurrency, setSourceCurrency] = useState<Currency | null>(null);
-  const [targetCurrency, setTargetCurrency] = useState<Currency | null>(null);
-  const [result, setResult] = useState<number | null>(null);
-  const [rateDate, setRateDate] = useState<string>('');
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [isOffline, setIsOffline] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+export function ConverterScreen() {
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+  const [fromCode, toCode] = usePair();
+  const from = getCurrency(fromCode)!;
+  const to = getCurrency(toCode)!;
+  const [picking, setPicking] = useState<Side | null>(null);
 
-  // Initialiser les devises par défaut
+  const [raw, setRaw] = useState('1');
+  const [active, setActive] = useState<Side>('from');
+  const { info, status, refreshing, refresh } = useRateInfo(from.code, to.code);
+
+  const activeCurrency = active === 'from' ? from : to;
+  const otherCurrency = active === 'from' ? to : from;
+
+  // Une devise sans décimales ne garde pas de partie décimale saisie pour une autre.
   useEffect(() => {
-    initializeCurrencies();
-  }, []);
+    if (activeCurrency.decimals === 0 && raw.includes('.')) setRaw(raw.split('.')[0]);
+  }, [activeCurrency.decimals, raw]);
 
-  const initializeCurrencies = async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
+  const otherRaw = useMemo(() => {
+    if (!info) return '';
+    const value = parseRaw(raw);
+    return toRaw(active === 'from' ? value * info.rate : value / info.rate, otherCurrency.decimals);
+  }, [info, raw, active, otherCurrency.decimals]);
 
-      // Récupérer les devises sélectionnées sauvegardées
-      const savedSource = await currencyService.getSelectedSourceCurrency();
-      const savedTarget = await currencyService.getSelectedTargetCurrency();
+  const onKey = useCallback(
+    (key: KeypadKey) => setRaw((value) => applyKey(value, key, activeCurrency.decimals)),
+    [activeCurrency.decimals],
+  );
 
-      const source = savedSource 
-        ? SUPPORTED_CURRENCIES.find(c => c.code === savedSource) || SUPPORTED_CURRENCIES[0]
-        : SUPPORTED_CURRENCIES[0]; // USD par défaut
-
-      const target = savedTarget
-        ? SUPPORTED_CURRENCIES.find(c => c.code === savedTarget) || SUPPORTED_CURRENCIES[1]
-        : SUPPORTED_CURRENCIES[1]; // EUR par défaut
-
-      setSourceCurrency(source);
-      setTargetCurrency(target);
-
-      // Précharger les taux
-      await currencyService.getAllRates(source.code);
-      setRateDate(new Date().toLocaleDateString('fr-FR'));
-      
-    } catch (err) {
-      console.error('Erreur initialisation:', err);
-      setError('Impossible de charger les taux de change');
-    } finally {
-      setIsLoading(false);
-    }
+  /** Saisir de l'autre côté : la valeur convertie devient la nouvelle saisie. */
+  const activate = (side: Side) => {
+    if (side === active) return;
+    setRaw(otherRaw);
+    setActive(side);
   };
 
-  // Calculer la conversion à chaque changement
-  const calculateConversion = useCallback(async () => {
-    if (!amount || !sourceCurrency || !targetCurrency) {
-      setResult(null);
-      return;
-    }
-
-    const numAmount = parseFloat(amount);
-    if (isNaN(numAmount)) {
-      setResult(null);
-      return;
-    }
-
-    try {
-      const converted = await currencyService.convert(numAmount, sourceCurrency.code, targetCurrency.code);
-      setResult(converted);
-      
-      // Récupérer la date du taux
-      const rate = await currencyService.getRate(sourceCurrency.code, targetCurrency.code);
-      setRateDate(new Date(rate.date).toLocaleDateString('fr-FR'));
-      setIsOffline(false);
-      setError(null);
-    } catch (err) {
-      console.error('Erreur conversion:', err);
-      setIsOffline(true);
-      setError('Utilisation du dernier taux connu (hors connexion)');
-    }
-  }, [amount, sourceCurrency, targetCurrency]);
-
-  useEffect(() => {
-    calculateConversion();
-  }, [calculateConversion]);
-
-  const handleAmountChange = (text: string) => {
-    // Valider que c'est un nombre valide
-    if (text === '' || /^\d*\.?\d*$/.test(text)) {
-      setAmount(text);
-    }
+  /** Le montant saisi reste attaché à sa devise, qui change de ligne. */
+  const swap = () => {
+    pair.swap();
+    setActive((side) => (side === 'from' ? 'to' : 'from'));
   };
 
-  const handleSourceCurrencySelect = (currency: Currency) => {
-    setSourceCurrency(currency);
-    currencyService.setSelectedSourceCurrency(currency.code);
+  /** Choisir la devise d'un côté ; si elle est de l'autre côté, la paire s'inverse avec le montant. */
+  const chooseCurrency = (code: string) => {
+    if (!picking) return;
+    if (code === (picking === 'from' ? to.code : from.code)) setActive((side) => (side === 'from' ? 'to' : 'from'));
+    pair.set(picking, code);
+    setPicking(null);
   };
 
-  const handleTargetCurrencySelect = (currency: Currency) => {
-    setTargetCurrency(currency);
-    currencyService.setSelectedTargetCurrency(currency.code);
-  };
+  // Hauteur des touches ajustée à l'écran (74 px, jusqu'à 52 px sur les petits écrans).
+  const [containerHeight, setContainerHeight] = useState(0);
+  const [heroHeight, setHeroHeight] = useState(0);
+  const keyHeight =
+    containerHeight && heroHeight
+      ? Math.max(MIN_KEY, Math.min(size.key, Math.floor((containerHeight - heroHeight + KEYPAD_OVERLAP - space[4]) / 4)))
+      : size.key;
+  const compact = containerHeight > 0 && containerHeight < 640;
 
-  const handleSwap = () => {
-    if (sourceCurrency && targetCurrency) {
-      setSourceCurrency(targetCurrency);
-      setTargetCurrency(sourceCurrency);
-      currencyService.setSelectedSourceCurrency(targetCurrency.code);
-      currencyService.setSelectedTargetCurrency(sourceCurrency.code);
-    }
-  };
-
-  const handleRefresh = async () => {
-    try {
-      setIsLoading(true);
-      if (sourceCurrency) {
-        await currencyService.getAllRates(sourceCurrency.code);
-        await calculateConversion();
-      }
-    } catch (err) {
-      setError('Impossible de rafraîchir les taux');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  if (isLoading) {
-    return (
-      <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#1a1a1a' : '#fff' }]}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={isDark ? '#fff' : '#007AFF'} />
-          <Text style={[styles.loadingText, { color: isDark ? '#fff' : '#000' }]}>Chargement...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  const offline = info?.kind === 'cached' || status === 'unavailable';
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#1a1a1a' : '#fff' }]}>
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        {/* Indicateur hors connexion */}
-        {isOffline && (
-          <View style={styles.offlineBanner}>
-            <Text style={styles.offlineText}>⚠️ Hors connexion — utilisation du dernier taux disponible</Text>
+    <View style={{ flex: 1, backgroundColor: colors.panel }} onLayout={(e: LayoutChangeEvent) => setContainerHeight(e.nativeEvent.layout.height)}>
+      <FocusStatusBar style="light" />
+      <ScrollView bounces={false} contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
+        <HeroCard
+          flushTop
+          onLayout={(e: LayoutChangeEvent) => setHeroHeight(e.nativeEvent.layout.height)}
+          style={{ paddingTop: insets.top + space[4], paddingBottom: KEYPAD_OVERLAP + space[3] }}
+        >
+          <AppHeader trailing={offline ? <Chip label={fr.converter.offline} /> : null} />
+          <View style={{ marginTop: compact ? space[4] : space[8] }}>
+            <ConversionPair
+              from={{ ...from, amount: active === 'from' ? raw : otherRaw }}
+              to={{ ...to, amount: active === 'to' ? raw : otherRaw }}
+              active={active}
+              onActivate={activate}
+              onChooseCurrency={setPicking}
+              onSwap={swap}
+            />
           </View>
-        )}
-
-        {/* Erreur */}
-        {error && !isOffline && (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorText}>⚠️ {error}</Text>
+          <View style={{ marginTop: space[4], flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: space[3] }}>
+            <RateChip {...rateChipProps(info, status, from.code, to.code)} />
+            {status === 'unavailable' && (
+              <Button label={fr.converter.retry} variant="ghost" icon="refresh" loading={refreshing} onPress={refresh} />
+            )}
           </View>
-        )}
-
-        {/* Devise source */}
-        <View style={styles.currencyCard}>
-          <View style={styles.currencyHeader}>
-            <Text style={[styles.currencyLabel, { color: isDark ? '#aaa' : '#666' }]}>DEVISE SOURCE</Text>
-          </View>
-          <TouchableOpacity 
-            style={styles.currencySelector}
-            onPress={() => navigation?.navigate('CurrencySelector', {
-              selectedCurrency: sourceCurrency,
-              onSelect: handleSourceCurrencySelect,
-              title: 'Choisir la devise source',
-            })}
-          >
-            <View style={styles.currencyInfo}>
-              <Text style={[styles.flag, { fontSize: 28 }]}>{sourceCurrency?.flag}</Text>
-              <View>
-                <Text style={[styles.currencyCode, { color: isDark ? '#fff' : '#000' }]}>{sourceCurrency?.code}</Text>
-                <Text style={[styles.currencyName, { color: isDark ? '#aaa' : '#666' }]}>{sourceCurrency?.name}</Text>
-              </View>
-            </View>
-            <Text style={[styles.currencySymbol, { color: isDark ? '#fff' : '#000' }]}>{sourceCurrency?.symbol}</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Montant */}
-        <View style={styles.amountCard}>
-          <TextInput
-            style={[styles.amountInput, { color: isDark ? '#fff' : '#000' }]}
-            value={amount}
-            onChangeText={handleAmountChange}
-            placeholder="0.00"
-            placeholderTextColor={isDark ? '#666' : '#999'}
-            keyboardType="decimal-pad"
-            autoFocus
-            maxLength={15}
-            textAlign="center"
+          <View
+            accessibilityElementsHidden
+            importantForAccessibility="no"
+            style={{ width: 72, height: 3, marginTop: space[6], alignSelf: 'center', borderRadius: radius.full, backgroundColor: colors.heroLine }}
           />
+        </HeroCard>
+        <View style={{ marginTop: -KEYPAD_OVERLAP, marginHorizontal: space[6], marginBottom: space[4] }}>
+          <Keypad onKey={onKey} keyHeight={keyHeight} decimalDisabled={activeCurrency.decimals === 0} />
         </View>
-
-        {/* Bouton Swap */}
-        <SwapButton
-          onPress={handleSwap}
-          disabled={!sourceCurrency || !targetCurrency}
-          colorScheme={colorScheme}
-        />
-
-        {/* Devise cible */}
-        <View style={styles.currencyCard}>
-          <View style={styles.currencyHeader}>
-            <Text style={[styles.currencyLabel, { color: isDark ? '#aaa' : '#666' }]}>DEVISE CIBLE</Text>
-          </View>
-          <TouchableOpacity 
-            style={styles.currencySelector}
-            onPress={() => navigation?.navigate('CurrencySelector', {
-              selectedCurrency: targetCurrency,
-              onSelect: handleTargetCurrencySelect,
-              title: 'Choisir la devise cible',
-            })}
-          >
-            <View style={styles.currencyInfo}>
-              <Text style={[styles.flag, { fontSize: 28 }]}>{targetCurrency?.flag}</Text>
-              <View>
-                <Text style={[styles.currencyCode, { color: isDark ? '#fff' : '#000' }]}>{targetCurrency?.code}</Text>
-                <Text style={[styles.currencyName, { color: isDark ? '#aaa' : '#666' }]}>{targetCurrency?.name}</Text>
-              </View>
-            </View>
-            <Text style={[styles.currencySymbol, { color: isDark ? '#fff' : '#000' }]}>{targetCurrency?.symbol}</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Résultat */}
-        <View style={styles.resultCard}>
-          <Text style={[styles.resultLabel, { color: isDark ? '#aaa' : '#666' }]}>RÉSULTAT</Text>
-          <Text style={[styles.resultValue, { color: isDark ? '#fff' : '#000' }]}>
-            {result !== null ? result.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
-          </Text>
-          <Text style={[styles.resultCurrency, { color: isDark ? '#aaa' : '#666' }]}>
-            {targetCurrency?.code} ({targetCurrency?.symbol})
-          </Text>
-        </View>
-
-        {/* Taux de change */}
-        {sourceCurrency && targetCurrency && (
-          <View style={styles.rateInfo}>
-            <Text style={[styles.rateText, { color: isDark ? '#888' : '#888' }]}>
-              1 {sourceCurrency.code} = {(1 / (await currencyService.convert(1, targetCurrency.code, sourceCurrency.code))).toFixed(4)} {targetCurrency.code}
-            </Text>
-            <Text style={[styles.rateDate, { color: isDark ? '#888' : '#888' }]}>
-              Taux du {rateDate} • {isOffline ? 'Hors connexion' : 'En ligne'}
-            </Text>
-          </View>
-        )}
-
-        {/* Bouton rafraîchir */}
-        <TouchableOpacity style={styles.refreshButton} onPress={handleRefresh} disabled={isLoading}>
-          <Text style={[styles.refreshText, { color: isDark ? '#fff' : '#007AFF' }]}>
-            {isLoading ? 'Actualisation...' : '🔄 Actualiser les taux'}
-          </Text>
-        </TouchableOpacity>
       </ScrollView>
-    </SafeAreaView>
+      <CurrencyPicker
+        side={picking}
+        current={picking === 'to' ? to.code : from.code}
+        other={picking === 'to' ? from.code : to.code}
+        onSelect={chooseCurrency}
+        onClose={() => setPicking(null)}
+      />
+    </View>
   );
-};
+}
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    padding: 20,
-    paddingBottom: 40,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 16,
-  },
-  loadingText: {
-    fontSize: 16,
-  },
-  offlineBanner: {
-    backgroundColor: '#FFF3CD',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: '#FFC107',
-  },
-  offlineText: {
-    color: '#856404',
-    fontSize: 14,
-    textAlign: 'center',
-  },
-  errorBanner: {
-    backgroundColor: '#F8D7DA',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: '#DC3545',
-  },
-  errorText: {
-    color: '#721C24',
-    fontSize: 14,
-    textAlign: 'center',
-  },
-  currencyCard: {
-    marginBottom: 16,
-  },
-  currencyHeader: {
-    marginBottom: 8,
-  },
-  currencyLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-  },
-  currencySelector: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  currencyInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  flag: {
-    fontSize: 28,
-  },
-  currencyCode: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  currencyName: {
-    fontSize: 13,
-  },
-  currencySymbol: {
-    fontSize: 20,
-    fontWeight: '600',
-  },
-  amountCard: {
-    marginBottom: 16,
-  },
-  amountInput: {
-    fontSize: 48,
-    fontWeight: '300',
-    textAlign: 'center',
-    padding: 20,
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  resultCard: {
-    marginTop: 8,
-    marginBottom: 24,
-    padding: 24,
-    backgroundColor: '#007AFF',
-    borderRadius: 16,
-    alignItems: 'center',
-  },
-  resultLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    color: 'rgba(255,255,255,0.8)',
-    marginBottom: 8,
-  },
-  resultValue: {
-    fontSize: 56,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  resultCurrency: {
-    fontSize: 18,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.9)',
-    marginTop: 4,
-  },
-  rateInfo: {
-    alignItems: 'center',
-    marginBottom: 24,
-    gap: 4,
-  },
-  rateText: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  rateDate: {
-    fontSize: 12,
-  },
-  refreshButton: {
-    padding: 16,
-    alignItems: 'center',
-  },
-  refreshText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-});
+function rateChipProps(info: RateInfo | undefined, status: string, from: string, to: string) {
+  if (!info) {
+    return status === 'unavailable'
+      ? { status: fr.converter.unavailable, statusIcon: 'close' as const }
+      : { status: fr.converter.loading };
+  }
+  const rates = { base: `1 ${from}`, quote: `${formatRate(info.rate)} ${to}` };
+  if (info.kind === 'peg') return { ...rates, status: fr.converter.peg, statusIcon: 'check' as const };
+  const freshness = info.kind === 'cached' ? fr.converter.offline : info.fetchedAt ? formatTime(info.fetchedAt) : undefined;
+  return {
+    ...rates,
+    change: info.change,
+    status: info.source === 'alt' ? [fr.converter.indicative, freshness].filter(Boolean).join(' · ') : freshness,
+  };
+}
