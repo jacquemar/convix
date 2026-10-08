@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="fr" data-theme="night">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Icon — Convix</title>
+<script>document.documentElement.dataset.theme = new URLSearchParams(location.search).get('theme') === 'day' ? 'day' : 'night';</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Unbounded:wght@300;400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components/bundle.css">
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="../components/bundle.js"></script>
+</head>
+<body>
+<!-- Jeu d&#x27;icônes Convix, 24px, trait 1.75 -->
+<div id="root"></div>
+<script>
+  var C = window.Convix, h = React.createElement;
+  var FLAGS = {"ca": "../assets/Flags/ca.svg", "ch": "../assets/Flags/ch.svg", "ci": "../assets/Flags/ci.svg", "cn": "../assets/Flags/cn.svg", "dk": "../assets/Flags/dk.svg", "eu": "../assets/Flags/eu.svg", "gb": "../assets/Flags/gb.svg", "gh": "../assets/Flags/gh.svg", "jp": "../assets/Flags/jp.svg", "ma": "../assets/Flags/ma.svg", "ng": "../assets/Flags/ng.svg", "us": "../assets/Flags/us.svg"};
+  var F = function (c) { return FLAGS[c]; };
+  var pad = function () { return h.apply(null, ['div', { className: 'cvx-demo cvx-demo--col' }].concat([].slice.call(arguments))); };
+
+  ReactDOM.createRoot(document.getElementById('root')).render(
+    h('div', { className: 'cvx-demo', style: { gap: 'var(--space-6)' } }, C.iconNames.map(function (n) {
+      return h('div', { key: n, style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-2)', width: 72 } },
+        h(C.Icon, { name: n }),
+        h('span', { className: 'text-caption', style: { color: 'var(--ink-muted)' } }, n));
+    })));
+</script>
+</body>
+</html>

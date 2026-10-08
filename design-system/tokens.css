@@ -1,0 +1,89 @@
+:root, [data-theme="night"] {
+  --canvas: #0e0a1a;
+  --sheet: #221a40;
+  --sheet-glow: #2c2474;
+  --ink: #f6f3ff;
+  --ink-muted: #b9aedb;
+  --ink-faint: #7f76a6;
+  --line: #ffffff1f;
+  --line-strong: #7a71ad;
+  --glass: #ffffff12;
+  --hero-base: #17132a;
+  --hero-glow-plum: #6b2590;
+  --hero-glow-indigo: #3a2399;
+  --on-hero: #ffffff;
+  --on-hero-muted: #c9bee8;
+  --hero-line: #ffffff24;
+  --hero-control-line: #8a82bd;
+  --panel: #ffffff;
+  --panel-ink: #1a1428;
+  --panel-muted: #6e6789;
+  --panel-line: #ece8f4;
+  --panel-pressed: #f1ecfc;
+  --violet: #7a45f0;
+  --orchid: #c25ae8;
+  --lilac: #c4a6ff;
+  --on-violet: #ffffff;
+  --accent: var(--lilac);
+  --focus: #9b5cff;
+  --rise: #5ee0c8;
+  --fall: #ffb36b;
+  --rise-hero: #5ee0c8;
+  --fall-hero: #ffb36b;
+  --shadow-panel: 0 -12px 40px #0e0a1a66;
+  --shadow-card: 0 24px 60px #00000080;
+  --glow-fab: 0 10px 28px #9b5cff8c, 0 0 0 1px #ffffff33 inset;
+  --focus-ring: 0 0 0 3px #9b5cff;
+}
+[data-theme="day"] {
+  --canvas: #f1ecfb;
+  --sheet: #ffffff;
+  --sheet-glow: #ebe4fb;
+  --ink: #19122e;
+  --ink-muted: #5d5381;
+  --ink-faint: #9a93b4;
+  --line: #19122e1a;
+  --line-strong: #8a82a8;
+  --glass: #19122e0d;
+  --accent: var(--violet);
+  --rise: #0b7363;
+  --fall: #a54a00;
+  --shadow-panel: 0 -8px 32px #3a239914;
+  --shadow-card: 0 18px 48px #3a23992e;
+}
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 28px;
+  --radius-xl: 40px;
+  --radius-full: 9999px;
+  --size-icon: 24px;
+  --size-flag: 36px;
+  --size-control: 36px;
+  --size-avatar: 40px;
+  --size-input: 52px;
+  --size-key: 74px;
+  --size-fab: 52px;
+  --size-tabbar: 84px;
+  --blur-glass: 18px;
+  --font-display: "Unbounded", "Arial Black", system-ui, sans-serif;
+  --font-sans: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.amount-xl { font-family: var(--font-display); font-size: 56px; line-height: 60px; font-weight: 500; letter-spacing: -0.03em; }
+.amount-lg { font-family: var(--font-display); font-size: 40px; line-height: 44px; font-weight: 500; letter-spacing: -0.03em; }
+.amount-md { font-family: var(--font-display); font-size: 24px; line-height: 28px; font-weight: 500; letter-spacing: -0.02em; }
+.keypad-digit { font-family: var(--font-display); font-size: 24px; line-height: 28px; font-weight: 400; }
+.lockup { font-family: var(--font-display); font-size: 15px; line-height: 16px; font-weight: 600; letter-spacing: 0.01em; }
+.sheet-title { font-family: var(--font-display); font-size: 16px; line-height: 20px; font-weight: 600; letter-spacing: 0.01em; }
+.currency-label { font-family: var(--font-display); font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.01em; }
+.button-label { font-family: var(--font-display); font-size: 13px; line-height: 16px; font-weight: 600; letter-spacing: 0.04em; }
+.text-body { font-family: var(--font-sans); font-size: 15px; line-height: 22px; font-weight: 500; }
+.text-strong { font-family: var(--font-sans); font-size: 15px; line-height: 22px; font-weight: 700; }
+.text-caption { font-family: var(--font-sans); font-size: 12px; line-height: 16px; font-weight: 600; letter-spacing: 0.02em; }
