@@ -93,7 +93,7 @@ Utilitaires : `Convix.applyKey(raw, key)` applique une touche du clavier ; `Conv
 
 ## Ce dossier
 
-Miroir versionné du design system Convix (artifact Design System) : tokens, brand book, logo, icônes, drapeaux et composants web de référence. Il n'est pas encore branché à l'app Expo — `src/` n'en importe rien.
+Miroir versionné du design system Convix (artifact Design System) : tokens, brand book, logo, icônes, drapeaux et composants web de référence. L'app Expo en dérive son thème (`src/theme/tokens.ts`, généré) et ses composants React Native (`src/components/ui/`).
 
 ```
 design-system/
@@ -128,6 +128,7 @@ python3 tools/build_logo.py                          # assets/Logos + components
 python3 tools/build_assets.py                        # assets/Icons, assets/Flags + components/src/icons.ts
 tools/build_bundle.sh                                # components/bundle.js (esbuild via npx)
 python3 tools/build_playground.py                    # playground/
+python3 tools/build_rn_theme.py                      # app : src/theme/tokens.ts + src/assets/icons.ts (= npm run tokens)
 ```
 
 Modifier une couleur ou une taille : éditer `tools/build_tokens.py` (et non `tokens.json` à la main), relancer les deux premières commandes, vérifier que le rapport affiche `failing pairs: 0`.
