@@ -1,5 +1,6 @@
 import { FrankfurterClient } from '../api/frankfurter';
-import { Rate, Currency } from '../types/currency';
+import { Rate } from '../types/currency';
+import { CURRENCIES } from '../data/currencies';
 
 describe('FrankfurterClient', () => {
   let client: FrankfurterClient;
@@ -45,19 +46,13 @@ describe('FrankfurterClient', () => {
   });
 
   describe('getCurrencies', () => {
-    it('should return a list of supported currencies', async () => {
+    it('should return the ECB currencies, including every app currency quoted by the ECB', async () => {
       const currencies = await client.getCurrencies();
-      
-      expect(currencies).toBeDefined();
-      expect(Array.isArray(currencies)).toBe(true);
-      expect(currencies.length).toBeGreaterThan(0);
-      
-      currencies.forEach((currency: Currency) => {
-        expect(currency.code).toBeDefined();
-        expect(currency.name).toBeDefined();
-        expect(currency.symbol).toBeDefined();
-        expect(currency.flag).toBeDefined();
-      });
+
+      expect(Object.keys(currencies).length).toBeGreaterThan(0);
+      for (const c of CURRENCIES.filter((c) => !c.peg && !c.alt)) {
+        expect(currencies[c.code]).toBeDefined();
+      }
     });
 
     it('should return cached data on second call', async () => {
