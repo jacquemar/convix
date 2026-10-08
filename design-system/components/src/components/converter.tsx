@@ -85,10 +85,17 @@ function useFitAmount(text: string) {
   const fit = React.useCallback(() => {
     const el = ref.current;
     if (!el) return;
+    // Content is right-aligned, so its overflow is on the start side and scrollWidth would not see it:
+    // sum the children's layout widths (offsetWidth ignores CSS transforms, like clientWidth).
+    const contentWidth = () =>
+      Array.from(el.children).reduce((w, child) => {
+        const cs = getComputedStyle(child);
+        return w + (child as HTMLElement).offsetWidth + parseFloat(cs.marginLeft) + parseFloat(cs.marginRight);
+      }, 0);
     for (const step of AMOUNT_STEPS) {
       el.classList.remove(...AMOUNT_STEPS);
       el.classList.add(step);
-      if (el.scrollWidth <= el.clientWidth) break;
+      if (contentWidth() <= el.clientWidth + 0.5) break;
     }
   }, []);
   React.useLayoutEffect(fit, [text, fit]);
@@ -97,8 +104,13 @@ function useFitAmount(text: string) {
     if (!el) return;
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fit) : null;
     ro?.observe(el);
+    // Web fonts may start loading after mount (ready can resolve first): refit on every load.
     document.fonts?.ready.then(fit).catch(() => undefined);
-    return () => ro?.disconnect();
+    document.fonts?.addEventListener('loadingdone', fit);
+    return () => {
+      ro?.disconnect();
+      document.fonts?.removeEventListener('loadingdone', fit);
+    };
   }, [fit]);
   return ref;
 }
