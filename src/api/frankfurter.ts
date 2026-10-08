@@ -1,12 +1,20 @@
-import { Currency, Rate } from '../types/currency';
+import { Rate } from '../types/currency';
 
-const API_BASE_URL = 'https://api.frankfurter.app';
+const API_BASE_URL = 'https://api.frankfurter.dev/v1';
 
 export interface FrankfurterLatestResponse {
   amount: number;
   base: string;
   date: string;
   rates: Record<string, number>;
+}
+
+export interface FrankfurterHistoricalResponse {
+  amount: number;
+  base: string;
+  start_date: string;
+  end_date: string;
+  rates: Record<string, Record<string, number>>;
 }
 
 export interface FrankfurterCurrenciesResponse {
@@ -19,7 +27,7 @@ export interface FrankfurterErrorResponse {
 
 export class FrankfurterClient {
   private static instance: FrankfurterClient;
-  private cache: Map<string, { data: any; timestamp: number }> = new Map();
+  private cache: Map<string, { data: unknown; timestamp: number }> = new Map();
   private readonly CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
   static getInstance(): FrankfurterClient {
@@ -104,7 +112,7 @@ export class FrankfurterClient {
     const cacheKey = this.getCacheKey('latest', { from: base });
     const cached = this.cache.get(cacheKey);
     if (cached && this.isCacheValid(cached.timestamp)) {
-      return cached.data;
+      return cached.data as Rate[];
     }
 
     const url = `${API_BASE_URL}/latest?from=${encodeURIComponent(base)}`;
@@ -122,25 +130,18 @@ export class FrankfurterClient {
     return rates;
   }
 
-  async getCurrencies(): Promise<Currency[]> {
+  /** Devises publiées par la BCE : code ISO → nom anglais. */
+  async getCurrencies(): Promise<FrankfurterCurrenciesResponse> {
     const cacheKey = this.getCacheKey('currencies', {});
     const cached = this.cache.get(cacheKey);
     if (cached && this.isCacheValid(cached.timestamp)) {
-      return cached.data;
+      return cached.data as FrankfurterCurrenciesResponse;
     }
 
     const url = `${API_BASE_URL}/currencies`;
     const response = await this.fetchWithErrorHandling<FrankfurterCurrenciesResponse>(url);
-
-    const currencies: Currency[] = Object.entries(response).map(([code, name]) => ({
-      code,
-      name,
-      symbol: this.getCurrencySymbol(code),
-      flag: this.getCurrencyFlag(code),
-    }));
-
-    this.cache.set(cacheKey, { data: currencies, timestamp: Date.now() });
-    return currencies;
+    this.cache.set(cacheKey, { data: response, timestamp: Date.now() });
+    return response;
   }
 
   async getHistoricalRates(
@@ -176,11 +177,11 @@ export class FrankfurterClient {
     const cacheKey = this.getCacheKey(`${startDate}..${endDate}`, { from: base, to: quote });
     const cached = this.cache.get(cacheKey);
     if (cached && this.isCacheValid(cached.timestamp)) {
-      return cached.data;
+      return cached.data as Rate[];
     }
 
     const url = `${API_BASE_URL}/${startDate}..${endDate}?from=${encodeURIComponent(base)}&to=${encodeURIComponent(quote)}`;
-    const response = await this.fetchWithErrorHandling<FrankfurterLatestResponse>(url);
+    const response = await this.fetchWithErrorHandling<FrankfurterHistoricalResponse>(url);
 
     const rates: Rate[] = Object.entries(response.rates).map(([date, rateData]) => ({
       base: response.base,
@@ -192,36 +193,6 @@ export class FrankfurterClient {
 
     this.cache.set(cacheKey, { data: rates, timestamp: Date.now() });
     return rates;
-  }
-
-  private getCurrencySymbol(code: string): string {
-    const symbols: Record<string, string> = {
-      USD: '$',
-      EUR: '€',
-      GBP: '£',
-      JPY: '¥',
-      AUD: 'A$',
-      CAD: 'C$',
-      CHF: 'CHF',
-      CNY: '¥',
-      XOF: 'CFA',
-    };
-    return symbols[code] || code;
-  }
-
-  private getCurrencyFlag(code: string): string {
-    const flags: Record<string, string> = {
-      USD: '🇺🇸',
-      EUR: '🇪🇺',
-      GBP: '🇬🇧',
-      JPY: '🇯🇵',
-      AUD: '🇦🇺',
-      CAD: '🇨🇦',
-      CHF: '🇨🇭',
-      CNY: '🇨🇳',
-      XOF: '🇨🇮',
-    };
-    return flags[code] || '🏳️';
   }
 
   clearCache(): void {

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="fr" data-theme="night">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ConverterScreen — Convix</title>
+<script>document.documentElement.dataset.theme = new URLSearchParams(location.search).get('theme') === 'day' ? 'day' : 'night';</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Unbounded:wght@300;400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components/bundle.css">
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="../components/bundle.js"></script>
+
+<style>
+  .stage { min-height: 100vh; box-sizing: border-box; padding: 40px 24px; display: flex; gap: 40px; justify-content: center; align-items: flex-start;
+           background: radial-gradient(70% 60% at 15% 10%, var(--orchid), transparent), radial-gradient(70% 70% at 90% 90%, var(--violet), transparent), var(--lilac); }
+  .phone { width: 372px; height: 806px; flex: none; padding: 9px; border-radius: 56px; box-sizing: border-box;
+           background: rgba(255, 255, 255, .22); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .45), var(--shadow-card); }
+  .screen { position: relative; height: 100%; overflow: hidden; border-radius: 48px; display: flex; flex-direction: column; background: var(--panel); }
+  .screen--dark { background: var(--hero-base); }
+  .hero-top { padding-top: var(--space-8); padding-bottom: 104px; border-radius: 0 0 var(--radius-xl) var(--radius-xl); }
+  .grab { display: block; width: 72px; height: 3px; margin: var(--space-6) auto 0; border-radius: var(--radius-full); background: var(--hero-line); }
+  .keys { margin: -92px var(--space-6) 0; position: relative; z-index: 1; }
+  .bar { margin-top: auto; }
+  .sheet-wrap { flex: 1; min-height: 0; margin-top: var(--space-4); display: flex; }
+  .sheet-wrap > .cvx-sheet { flex: 1; }
+  .rate { margin-top: var(--space-4); display: flex; justify-content: flex-start; }
+  @media (max-width: 860px) { .stage { flex-wrap: wrap; } }
+</style>
+</head>
+<body>
+<!-- Démo interactive : clavier, inversion, ajout/retrait de devises (taux de démonstration) -->
+<div id="root"></div>
+<script>
+  var C = window.Convix, h = React.createElement;
+  var FLAGS = {"ca": "../assets/Flags/ca.svg", "ch": "../assets/Flags/ch.svg", "ci": "../assets/Flags/ci.svg", "cn": "../assets/Flags/cn.svg", "dk": "../assets/Flags/dk.svg", "eu": "../assets/Flags/eu.svg", "gb": "../assets/Flags/gb.svg", "gh": "../assets/Flags/gh.svg", "jp": "../assets/Flags/jp.svg", "ma": "../assets/Flags/ma.svg", "ng": "../assets/Flags/ng.svg", "us": "../assets/Flags/us.svg"};
+  var F = function (c) { return FLAGS[c]; };
+  var pad = function () { return h.apply(null, ['div', { className: 'cvx-demo cvx-demo--col' }].concat([].slice.call(arguments))); };
+
+  /* Demo rates per 1 EUR — illustrative only; XOF is the fixed BCEAO parity. */
+  var CUR = {
+    XOF: { flag: F('ci'), name: 'Franc CFA (BCEAO)', rate: 655.957, dec: 0 },
+    EUR: { flag: F('eu'), name: 'Euro', rate: 1, dec: 2 },
+    USD: { flag: F('us'), name: 'Dollar américain', rate: 1.0857, dec: 2 },
+    GBP: { flag: F('gb'), name: 'Livre sterling', rate: 0.8384, dec: 2 },
+    NGN: { flag: F('ng'), name: 'Naira nigérian', rate: 1791.4, dec: 2 },
+    GHS: { flag: F('gh'), name: 'Cedi ghanéen', rate: 16.52, dec: 2 },
+    MAD: { flag: F('ma'), name: 'Dirham marocain', rate: 10.82, dec: 2 },
+    CNY: { flag: F('cn'), name: 'Yuan chinois', rate: 7.73, dec: 2 },
+    JPY: { flag: F('jp'), name: 'Yen japonais', rate: 162.3, dec: 0 },
+    CAD: { flag: F('ca'), name: 'Dollar canadien', rate: 1.487, dec: 2 },
+    CHF: { flag: F('ch'), name: 'Franc suisse', rate: 0.9409, dec: 2 },
+    DKK: { flag: F('dk'), name: 'Couronne danoise', rate: 7.4605, dec: 2 }
+  };
+  var TABS = [{ id: 'home', icon: 'home', label: 'Accueil' }, { id: 'rates', icon: 'globe', label: 'Devises' },
+              { id: 'convert', icon: 'keypad', label: 'Convertir', primary: true },
+              { id: 'alerts', icon: 'bell', label: 'Alertes' }, { id: 'settings', icon: 'settings', label: 'Réglages' }];
+
+  function convert(raw, from, to) {
+    var n = parseFloat(raw || '0') * CUR[to].rate / CUR[from].rate;
+    var s = n.toFixed(CUR[to].dec);
+    return CUR[to].dec ? s.replace(/\.?0+$/, '') : s;
+  }
+  function rateLine(a, b) {
+    var r = CUR[b].rate / CUR[a].rate;
+    return { base: '1 ' + a, quote: r.toLocaleString('fr-FR', { maximumFractionDigits: r < 10 ? 4 : 2 }) + ' ' + b };
+  }
+
+  function App() {
+    var favs = React.useState(['EUR', 'XOF', 'USD']), list = favs[0], setList = favs[1];
+    var typed = React.useState('632'), raw = typed[0], setRaw = typed[1];
+    var side = React.useState('from'), active = side[0], setActive = side[1];
+    var tab = React.useState('convert');
+    var q = React.useState('');
+    var from = list[0], to = list[1];
+    var other = active === 'from' ? convert(raw, from, to) : convert(raw, to, from);
+    var val = function (code, s) {
+      return { flag: CUR[code].flag, code: code, name: CUR[code].name, amount: active === s ? raw : other };
+    };
+    var onKey = React.useCallback(function (k) { setRaw(function (v) { return C.applyKey(v, k); }); }, []);
+    var swap = function () { setList([list[1], list[0]].concat(list.slice(2))); setActive(active === 'from' ? 'to' : 'from'); };
+    var activate = function (s) { if (s !== active) { setRaw(other); setActive(s); } };
+    var remove = function (code) { if (list.length > 2) setList(list.filter(function (c) { return c !== code; })); };
+    var add = function (code) { setList([list[0], code].concat(list.slice(1))); };
+    var needle = q[0].trim().toLowerCase();
+    var rest = Object.keys(CUR).filter(function (c) {
+      return list.indexOf(c) < 0 && (!needle || c.toLowerCase().indexOf(needle) >= 0 || CUR[c].name.toLowerCase().indexOf(needle) >= 0);
+    });
+    var rl = rateLine(from, to);
+    var header = h(C.AppHeader, { trailing: h(C.Avatar, { initials: 'KA', alt: 'Profil' }) });
+
+    var converter = h('div', { className: 'phone' }, h('div', { className: 'screen' },
+      h(C.HeroCard, { flushTop: true, className: 'hero-top' },
+        header,
+        h('div', { style: { marginTop: 'var(--space-8)' } },
+          h(C.ConversionPair, { from: val(from, 'from'), to: val(to, 'to'), active: active, onActivate: activate, onSwap: swap })),
+        h('div', { className: 'rate' }, h(C.RateChip, { base: rl.base, quote: rl.quote, time: 'démo' })),
+        h('span', { className: 'grab', 'aria-hidden': 'true' })),
+      h('div', { className: 'keys' }, h(C.Keypad, { onKey: onKey })),
+      h('div', { className: 'bar' }, h(C.TabBar, { items: TABS, activeId: tab[0], onChange: tab[1] }))));
+
+    var currencies = h('div', { className: 'phone' }, h('div', { className: 'screen screen--dark' },
+      h(C.HeroCard, { flushTop: true, style: { paddingTop: 'var(--space-8)', borderRadius: 0, boxShadow: 'none' } }, header),
+      h('div', { className: 'sheet-wrap' },
+        h(C.Sheet, { title: 'Vos devises', fade: rest.length > 4 },
+          h(C.CurrencyList, { label: 'Vos devises' }, list.map(function (c, i) {
+            return h(C.CurrencyItem, { key: c, flag: CUR[c].flag, name: CUR[c].name, code: c,
+              meta: i < 2 ? (i === 0 ? 'Devise source' : 'Devise cible') : c,
+              selected: i < 2, action: 'remove', disabled: list.length <= 2, onAction: function () { remove(c); } });
+          })),
+          h(C.Divider),
+          h(C.SectionTitle, null, 'Ajouter'),
+          h(C.SearchField, { value: q[0], onChange: q[1], onVoice: function () {} }),
+          h('div', { style: { height: 'var(--space-3)' } }),
+          h(C.CurrencyList, { label: 'Ajouter une devise' }, rest.map(function (c) {
+            return h(C.CurrencyItem, { key: c, flag: CUR[c].flag, name: CUR[c].name, code: c, action: 'add', onAction: function () { add(c); } });
+          }))))));
+
+    return h('div', { className: 'stage' }, converter, currencies);
+  }
+  ReactDOM.createRoot(document.getElementById('root')).render(h(App));
+</script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="fr" data-theme="night">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HeroCard — Convix</title>
+<script>document.documentElement.dataset.theme = new URLSearchParams(location.search).get('theme') === 'day' ? 'day' : 'night';</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Unbounded:wght@300;400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components/bundle.css">
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="../components/bundle.js"></script>
+</head>
+<body>
+<!-- Surface du hero, halos prune et indigo -->
+<div id="root"></div>
+<script>
+  var C = window.Convix, h = React.createElement;
+  var FLAGS = {"ca": "../assets/Flags/ca.svg", "ch": "../assets/Flags/ch.svg", "ci": "../assets/Flags/ci.svg", "cn": "../assets/Flags/cn.svg", "dk": "../assets/Flags/dk.svg", "eu": "../assets/Flags/eu.svg", "gb": "../assets/Flags/gb.svg", "gh": "../assets/Flags/gh.svg", "jp": "../assets/Flags/jp.svg", "ma": "../assets/Flags/ma.svg", "ng": "../assets/Flags/ng.svg", "us": "../assets/Flags/us.svg"};
+  var F = function (c) { return FLAGS[c]; };
+  var pad = function () { return h.apply(null, ['div', { className: 'cvx-demo cvx-demo--col' }].concat([].slice.call(arguments))); };
+
+  ReactDOM.createRoot(document.getElementById('root')).render(pad(
+    h(C.HeroCard, null,
+      h(C.AppHeader, { trailing: h(C.Avatar, { initials: 'KA', alt: 'Profil' }) }),
+      h('div', { style: { marginTop: 'var(--space-8)', display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' } },
+        h(C.RateChip, { base: '1 USD', quote: '604,18 XOF', change: 0.42, time: '11:30' })),
+      h('div', { style: { height: 64 } }))));
+</script>
+</body>
+</html>

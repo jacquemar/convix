@@ -1,193 +1,110 @@
-import { CurrencyService } from '../services/currency.service';
-import { Rate } from '../types/currency';
+import { CurrencyService } from './currency.service';
+import { frankfurterClient } from '../api/frankfurter';
+import { currencyApi } from '../api/currency-api';
+import { storage } from '../storage/storage';
+import type { Rate } from '../types/currency';
 
-// Mock MMKV
-jest.mock('react-native-mmkv', () => ({
-  MMKV: jest.fn().mockImplementation(() => ({
-    storage: {} as Record<string, string>,
-    getString: function(key: string) {
-      return this.storage[key] || undefined;
-    },
-    set: function(key: string, value: string) {
-      this.storage[key] = value;
-    },
-    delete: function(key: string) {
-      delete this.storage[key];
-    },
-    clearAll: function() {
-      this.storage = {};
-    },
-    getAllKeys: function() {
-      return Object.keys(this.storage);
-    },
-  })),
-}));
-
-// Mock FrankfurterClient
 jest.mock('../api/frankfurter', () => ({
   frankfurterClient: {
     getLatestRates: jest.fn(),
-    getCurrencies: jest.fn(),
     getHistoricalRates: jest.fn(),
     clearCache: jest.fn(),
   },
-  FrankfurterClient: {
-    getInstance: jest.fn().mockReturnValue({
-      getLatestRates: jest.fn(),
-      getCurrencies: jest.fn(),
-      getHistoricalRates: jest.fn(),
-      clearCache: jest.fn(),
-    }),
-  },
 }));
 
-import { frankfurterClient } from '../api/frankfurter';
+jest.mock('../api/currency-api', () => ({
+  currencyApi: { latest: jest.fn(), onDate: jest.fn() },
+}));
+
+const latest = frankfurterClient.getLatestRates as jest.Mock;
+const altLatest = currencyApi.latest as jest.Mock;
+const altOnDate = currencyApi.onDate as jest.Mock;
+const historical = frankfurterClient.getHistoricalRates as jest.Mock;
+
+function rates(base: string, table: Record<string, number>, date = '2026-10-07'): Rate[] {
+  return Object.entries(table).map(([quote, rate]) => ({ base, quote, rate, date, cachedAt: '' }));
+}
 
 describe('CurrencyService', () => {
-  let service: CurrencyService;
+  const service = CurrencyService.getInstance();
 
   beforeEach(() => {
-    service = CurrencyService.getInstance();
-    jest.clearAllMocks();
+    storage.clearAll();
+    jest.resetAllMocks();
+    historical.mockResolvedValue([
+      { base: 'EUR', quote: 'USD', rate: 1.08, date: '2026-10-06', cachedAt: '' },
+      { base: 'EUR', quote: 'USD', rate: 1.0854, date: '2026-10-07', cachedAt: '' },
+    ]);
   });
 
-  describe('convert', () => {
-    it('should convert amount using the exchange rate', async () => {
-      const mockRate: Rate = {
-        base: 'USD',
-        quote: 'EUR',
-        rate: 0.85,
-        date: '2026-08-16',
-        cachedAt: new Date().toISOString(),
-      };
-
-      (frankfurterClient.getLatestRates as jest.Mock).mockResolvedValue([mockRate]);
-
-      const result = await service.convert(100, 'USD', 'EUR');
-      
-      expect(result).toBe(85); // 100 * 0.85 = 85
-    });
-
-    it('should return same amount for same currency', async () => {
-      const result = await service.convert(100, 'USD', 'USD');
-      expect(result).toBe(100);
-    });
-
-    it('should handle decimal amounts', async () => {
-      const mockRate: Rate = {
-        base: 'USD',
-        quote: 'EUR',
-        rate: 0.8523,
-        date: '2026-08-16',
-        cachedAt: new Date().toISOString(),
-      };
-
-      (frankfurterClient.getLatestRates as jest.Mock).mockResolvedValue([mockRate]);
-
-      const result = await service.convert(10.5, 'USD', 'EUR');
-      
-      // 10.5 * 0.8523 = 8.94915 -> arrondi à 4 décimales = 8.9492
-      expect(result).toBe(8.9492);
-    });
-
-    it('should handle large amounts', async () => {
-      const mockRate: Rate = {
-        base: 'USD',
-        quote: 'EUR',
-        rate: 0.85,
-        date: '2026-08-16',
-        cachedAt: new Date().toISOString(),
-      };
-
-      (frankfurterClient.getLatestRates as jest.Mock).mockResolvedValue([mockRate]);
-
-      const result = await service.convert(1000000, 'USD', 'EUR');
-      expect(result).toBe(850000);
-    });
-
-    it('should throw error for unavailable currency pair', async () => {
-      (frankfurterClient.getLatestRates as jest.Mock).mockResolvedValue([]);
-
-      await expect(service.convert(100, 'USD', 'INVALID')).rejects.toThrow();
-    });
+  it('convertit EUR ↔ XOF par parité fixe, sans réseau', async () => {
+    const info = await service.getRateInfo('EUR', 'XOF');
+    expect(info.rate).toBeCloseTo(655.957, 6);
+    expect(info.kind).toBe('peg');
+    expect((await service.getRateInfo('XOF', 'EUR')).rate).toBeCloseTo(1 / 655.957, 9);
+    expect((await service.getRateInfo('XOF', 'XAF')).rate).toBeCloseTo(1, 9);
+    expect(latest).not.toHaveBeenCalled();
   });
 
-  describe('getRate', () => {
-    it('should return rate from cache if valid', async () => {
-      const cachedRate = {
-        rate: 0.85,
-        date: '2026-08-16',
-        cachedAt: new Date().toISOString(),
-      };
-
-      // Simuler le cache
-      const serviceInstance = CurrencyService.getInstance();
-      // On ne peut pas accéder au storage privé directement dans le test
-      // Ce test vérifierait l'intégration avec MMKV
-    });
-
-    it('should fetch new rate if cache is expired', async () => {
-      const mockRate: Rate = {
-        base: 'USD',
-        quote: 'EUR',
-        rate: 0.85,
-        date: '2026-08-16',
-        cachedAt: new Date().toISOString(),
-      };
-
-      (frankfurterClient.getLatestRates as jest.Mock).mockResolvedValue([mockRate]);
-
-      const rate = await service.getRate('USD', 'EUR');
-      
-      expect(rate.rate).toBe(0.85);
-      expect(rate.base).toBe('USD');
-      expect(rate.quote).toBe('EUR');
-    });
+  it('passe par l’euro pour USD → XOF', async () => {
+    latest.mockResolvedValue(rates('USD', { EUR: 0.92 }));
+    const info = await service.getRateInfo('USD', 'XOF');
+    expect(latest).toHaveBeenCalledWith('USD');
+    expect(info.rate).toBeCloseTo(0.92 * 655.957, 6);
+    expect(info.pegged).toBe(true);
+    expect(info.kind).toBe('live');
   });
 
-  describe('favorite currencies', () => {
-    it('should add and remove favorite currencies', async () => {
-      await service.addFavoriteCurrency('USD');
-      const favorites = await service.getFavoriteCurrencies();
-      expect(favorites).toContain('USD');
-
-      await service.removeFavoriteCurrency('USD');
-      const favoritesAfterRemove = await service.getFavoriteCurrencies();
-      expect(favoritesAfterRemove).not.toContain('USD');
-    });
-
-    it('should toggle favorite currency', async () => {
-      const isAdded = await service.toggleFavoriteCurrency('EUR');
-      expect(isAdded).toBe(true);
-
-      const isRemoved = await service.toggleFavoriteCurrency('EUR');
-      expect(isRemoved).toBe(false);
-    });
+  it('sert le cache de moins de 24 h sans rappeler l’API', async () => {
+    latest.mockResolvedValue(rates('EUR', { USD: 1.0854 }));
+    await service.getRateInfo('EUR', 'USD');
+    await service.getRateInfo('EUR', 'USD');
+    expect(latest).toHaveBeenCalledTimes(1);
   });
 
-  describe('selected currencies', () => {
-    it('should store and retrieve selected source currency', async () => {
-      await service.setSelectedSourceCurrency('USD');
-      const source = await service.getSelectedSourceCurrency();
-      expect(source).toBe('USD');
-    });
-
-    it('should store and retrieve selected target currency', async () => {
-      await service.setSelectedTargetCurrency('EUR');
-      const target = await service.getSelectedTargetCurrency();
-      expect(target).toBe('EUR');
-    });
+  it('calcule la variation depuis la publication précédente', async () => {
+    latest.mockResolvedValue(rates('EUR', { USD: 1.0854 }));
+    const info = await service.getRateInfo('EUR', 'USD');
+    expect(info.change).toBeCloseTo((1.0854 / 1.08 - 1) * 100, 6);
   });
 
-  describe('cache management', () => {
-    it('should clear cache', async () => {
-      await service.clearCache();
-      // Pas d'erreur = succès
-    });
+  it('retombe sur le dernier taux connu hors connexion', async () => {
+    latest.mockResolvedValueOnce(rates('EUR', { USD: 1.0854 }));
+    await service.getRateInfo('EUR', 'USD');
+    latest.mockRejectedValueOnce(new Error('réseau'));
+    const info = await service.getRateInfo('EUR', 'USD', { force: true });
+    expect(info.kind).toBe('cached');
+    expect(info.rate).toBe(1.0854);
+  });
 
-    it('should clear all data', async () => {
-      await service.clearAllData();
-      // Pas d'erreur = succès
-    });
+  it('échoue si aucun taux n’a jamais été récupéré', async () => {
+    latest.mockRejectedValue(new Error('réseau'));
+    await expect(service.getRateInfo('EUR', 'USD')).rejects.toThrow('réseau');
+  });
+
+  it('utilise la source alternative pour les devises hors BCE (NGN)', async () => {
+    altLatest.mockResolvedValue({ date: '2026-10-08', rates: { NGN: 1500, USD: 1.12 } });
+    altOnDate.mockResolvedValue({ date: '2026-10-07', rates: { NGN: 1485, USD: 1.12 } });
+    const info = await service.getRateInfo('USD', 'NGN');
+    expect(latest).not.toHaveBeenCalled();
+    expect(info.source).toBe('alt');
+    expect(info.rate).toBeCloseTo(1500 / 1.12, 6);
+    expect(info.change).toBeCloseTo((1500 / 1485 - 1) * 100, 6);
+  });
+
+  it('combine parité fixe et source alternative (XOF → NGN)', async () => {
+    altLatest.mockResolvedValue({ date: '2026-10-08', rates: { NGN: 1500 } });
+    altOnDate.mockRejectedValue(new Error('réseau'));
+    const info = await service.getRateInfo('XOF', 'NGN');
+    expect(info.rate).toBeCloseTo(1500 / 655.957, 6);
+    expect(info.pegged).toBe(true);
+    expect(info.change).toBeUndefined();
+  });
+
+  it('efface les taux stockés', async () => {
+    latest.mockResolvedValue(rates('EUR', { USD: 1.0854 }));
+    await service.getRateInfo('EUR', 'USD');
+    service.clearCache();
+    expect(storage.getAllKeys().filter((k) => k.startsWith('rates_'))).toHaveLength(0);
   });
 });

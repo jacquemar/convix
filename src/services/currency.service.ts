@@ -1,23 +1,46 @@
-import { MMKV } from 'react-native-mmkv';
-import { frankfurterClient, Rate } from '../api/frankfurter';
-import { Currency } from '../types/currency';
+import { frankfurterClient } from '../api/frankfurter';
+import { currencyApi, type AltRateTable } from '../api/currency-api';
+import { getCurrency } from '../data/currencies';
+import { readJson, storage, writeJson } from '../storage/storage';
+import type { RateInfo } from '../types/currency';
 
-const STORAGE = new MMKV();
 const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24h
+const RATES_PREFIX = 'rates_';
+const CHANGE_PREFIX = 'change_';
+const ALT_KEY = 'alt_rates';
+const ALT_PREVIOUS_KEY = 'alt_rates_previous';
+const LEGACY_PREFIX = 'rate_';
 
-interface CachedRate {
-  rate: number;
+/** Tableau de taux stocké dans MMKV : 1 `base` = rates[code] code. */
+interface StoredTable {
+  base: string;
   date: string;
-  cachedAt: string;
+  fetchedAt: string;
+  rates: Record<string, number>;
 }
 
-interface CachedRateData {
-  [key: string]: CachedRate;
+/**
+ * Devise à interroger pour `code`, et facteur à appliquer :
+ * 1 `code` = `factor` `quoted` (ex. 1 XOF = 1/655,957 EUR).
+ */
+function resolve(code: string): { quoted: string; factor: number; pegged: boolean } {
+  const peg = getCurrency(code)?.peg;
+  return peg ? { quoted: peg.anchor, factor: 1 / peg.rate, pegged: true } : { quoted: code, factor: 1, pegged: false };
+}
+
+function isFresh(table: { fetchedAt: string } | undefined): boolean {
+  return !!table && Date.now() - new Date(table.fetchedAt).getTime() < CACHE_DURATION;
+}
+
+function previousDay(date: string): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
 }
 
 export class CurrencyService {
   private static instance: CurrencyService;
-  private isRefreshing = false;
+  private inflight = new Map<string, Promise<StoredTable>>();
 
   static getInstance(): CurrencyService {
     if (!CurrencyService.instance) {
@@ -26,272 +49,181 @@ export class CurrencyService {
     return CurrencyService.instance;
   }
 
-  private getCacheKey(from: string, to: string): string {
-    return `rate_${from}_${to}`;
-  }
+  /**
+   * Taux de `from` vers `to`. Cache First → Network Refresh :
+   * cache de moins de 24 h, sinon réseau, sinon dernier taux connu (`kind: 'cached'`).
+   * BCE quand les deux devises y sont (après parité), source alternative sinon.
+   * Lève une erreur seulement si aucun taux n'a jamais été récupéré pour cette paire.
+   */
+  async getRateInfo(from: string, to: string, options: { force?: boolean } = {}): Promise<RateInfo> {
+    const source = resolve(from);
+    const target = resolve(to);
+    const pegged = source.pegged || target.pegged;
+    // 1 from = source.factor quotedFrom ; 1 quotedTo = 1/target.factor to.
+    const pegFactor = source.factor / target.factor;
+    const force = options.force ?? false;
 
-  private getCacheKeyAll(base: string): string {
-    return `rates_${base}`;
-  }
-
-  private getFavoriteCurrenciesKey(): string {
-    return 'favorite_currencies';
-  }
-
-  private getSelectedSourceCurrencyKey(): string {
-    return 'selected_source_currency';
-  }
-
-  private getSelectedTargetCurrencyKey(): string {
-    return 'selected_target_currency';
-  }
-
-  private isCacheValid(cachedAt: string): boolean {
-    const cacheTime = new Date(cachedAt).getTime();
-    return Date.now() - cacheTime < CACHE_DURATION;
-  }
-
-  async getRate(from: string, to: string): Promise<Rate> {
-    const cacheKey = this.getCacheKey(from, to);
-    const cachedData = STORAGE.getString(cacheKey);
-
-    if (cachedData) {
-      try {
-        const cached: CachedRate = JSON.parse(cachedData);
-        if (this.isCacheValid(cached.cachedAt)) {
-          return {
-            base: from,
-            quote: to,
-            rate: cached.rate,
-            date: cached.date,
-            cachedAt: cached.cachedAt,
-          };
-        }
-      } catch (e) {
-        // Cache corrompu, on ignore
-      }
+    if (source.quoted === target.quoted) {
+      return { from, to, rate: pegFactor, source: 'peg', kind: from === to ? 'live' : 'peg', pegged };
     }
 
-    // Si pas de cache valide, on rafraîchit
-    return this.refreshRate(from, to);
-  }
-
-  private async refreshRate(from: string, to: string): Promise<Rate> {
-    try {
-      const rates = await frankfurterClient.getLatestRates(from);
-      const rateData = rates.find(r => r.quote === to);
-      
-      if (!rateData) {
-        throw new Error(`Taux non disponible pour ${from} -> ${to}`);
-      }
-
-      // Mettre à jour le cache
-      const cacheKey = this.getCacheKey(from, to);
-      const cached: CachedRate = {
-        rate: rateData.rate,
-        date: rateData.date,
-        cachedAt: new Date().toISOString(),
-      };
-      STORAGE.set(cacheKey, JSON.stringify(cached));
-
-      return rateData;
-    } catch (error) {
-      // Si erreur réseau, on essaie de retourner le cache même expiré
-      const cacheKey = this.getCacheKey(from, to);
-      const cachedData = STORAGE.getString(cacheKey);
-      if (cachedData) {
-        try {
-          const cached: CachedRate = JSON.parse(cachedData);
-          return {
-            base: from,
-            quote: to,
-            rate: cached.rate,
-            date: cached.date,
-            cachedAt: cached.cachedAt,
-          };
-        } catch (e) {
-          // Cache corrompu
-        }
-      }
-      throw error;
+    if (getCurrency(source.quoted)?.alt || getCurrency(target.quoted)?.alt) {
+      return this.getAltRateInfo(from, to, source.quoted, target.quoted, pegFactor, pegged, force);
     }
+
+    const { table, stale } = await this.load(RATES_PREFIX + source.quoted, force, () => this.fetchEcb(source.quoted));
+    const ecbRate = table.rates[target.quoted];
+    if (ecbRate === undefined) {
+      throw new Error(`Taux non disponible pour ${from} → ${to}`);
+    }
+    const change = await this.getEcbChange(source.quoted, target.quoted, table.date).catch(() => undefined);
+    return {
+      from,
+      to,
+      rate: ecbRate * pegFactor,
+      source: 'ecb',
+      date: table.date,
+      fetchedAt: table.fetchedAt,
+      kind: stale ? 'cached' : 'live',
+      pegged,
+      change,
+    };
   }
 
+  private async getAltRateInfo(
+    from: string,
+    to: string,
+    quotedFrom: string,
+    quotedTo: string,
+    pegFactor: number,
+    pegged: boolean,
+    force: boolean,
+  ): Promise<RateInfo> {
+    const { table, stale } = await this.load(ALT_KEY, force, () => this.fetchAlt());
+    const cross = (rates: Record<string, number>) => {
+      const a = quotedFrom === 'EUR' ? 1 : rates[quotedFrom];
+      const b = quotedTo === 'EUR' ? 1 : rates[quotedTo];
+      return a && b ? b / a : undefined;
+    };
+    const rate = cross(table.rates);
+    if (rate === undefined) {
+      throw new Error(`Taux non disponible pour ${from} → ${to}`);
+    }
+    const previous = await this.getAltPrevious(table.date).catch(() => undefined);
+    const previousRate = previous && cross(previous.rates);
+    return {
+      from,
+      to,
+      rate: rate * pegFactor,
+      source: 'alt',
+      date: table.date,
+      fetchedAt: table.fetchedAt,
+      kind: stale ? 'cached' : 'live',
+      pegged,
+      change: previousRate ? (rate / previousRate - 1) * 100 : undefined,
+    };
+  }
+
+  /** Conversion simple (utilitaire, l'écran calcule localement avec `getRateInfo`). */
   async convert(amount: number, from: string, to: string): Promise<number> {
     if (from === to) return amount;
-    
-    const rate = await this.getRate(from, to);
-    const result = amount * rate.rate;
-    
-    // Arrondir à 4 décimales pour la précision interne
-    return Math.round(result * 10000) / 10000;
+    const { rate } = await this.getRateInfo(from, to);
+    return Math.round(amount * rate * 10000) / 10000;
   }
 
-  async getAllRates(base: string = 'USD'): Promise<Rate[]> {
-    const cacheKey = this.getCacheKeyAll(base);
-    const cachedData = STORAGE.getString(cacheKey);
-
-    if (cachedData) {
-      try {
-        const cached: CachedRateData = JSON.parse(cachedData);
-        const now = Date.now();
-        let hasValidData = false;
-        
-        for (const key in cached) {
-          if (this.isCacheValid(cached[key].cachedAt)) {
-            hasValidData = true;
-            break;
-          }
-        }
-        
-        if (hasValidData) {
-          return Object.entries(cached).map(([pair, data]) => {
-            const [from, to] = pair.split('_');
-            return {
-              base: from,
-              quote: to,
-              rate: data.rate,
-              date: data.date,
-              cachedAt: data.cachedAt,
-            };
-          });
-        }
-      } catch (e) {
-        // Cache corrompu
-      }
+  /** Force le rafraîchissement des taux utilisés par une devise. */
+  async refresh(code: string): Promise<void> {
+    const { quoted } = resolve(code);
+    if (getCurrency(quoted)?.alt) {
+      await this.load(ALT_KEY, true, () => this.fetchAlt());
+    } else {
+      await this.load(RATES_PREFIX + quoted, true, () => this.fetchEcb(quoted));
     }
-
-    // Rafraîchir
-    return this.refreshAllRates(base);
   }
 
-  private async refreshAllRates(base: string): Promise<Rate[]> {
+  /** Cache de moins de 24 h, sinon réseau, sinon cache périmé (`stale`). */
+  private async load(key: string, force: boolean, fetcher: () => Promise<StoredTable>) {
+    const cached = readJson<StoredTable>(key);
+    if (cached && !force && isFresh(cached)) return { table: cached, stale: false };
     try {
-      const rates = await frankfurterClient.getLatestRates(base);
-      
-      const cached: CachedRateData = {};
-      rates.forEach(rate => {
-        const key = `${rate.base}_${rate.quote}`;
-        cached[key] = {
-          rate: rate.rate,
-          date: rate.date,
-          cachedAt: new Date().toISOString(),
-        };
-      });
-      
-      const cacheKey = this.getCacheKeyAll(base);
-      STORAGE.set(cacheKey, JSON.stringify(cached));
-      
-      return rates;
+      return { table: await this.once(key, fetcher), stale: false };
     } catch (error) {
-      // Retourner le cache même expiré
-      const cacheKey = this.getCacheKeyAll(base);
-      const cachedData = STORAGE.getString(cacheKey);
-      if (cachedData) {
-        try {
-          const cached: CachedRateData = JSON.parse(cachedData);
-          return Object.entries(cached).map(([pair, data]) => {
-            const [from, to] = pair.split('_');
-            return {
-              base: from,
-              quote: to,
-              rate: data.rate,
-              date: data.date,
-              cachedAt: data.cachedAt,
-            };
-          });
-        } catch (e) {
-          // Cache corrompu
-        }
-      }
+      if (cached) return { table: cached, stale: true };
       throw error;
     }
   }
 
-  // Méthode pour rafraîchir en arrière-plan (Cache First → Network Refresh)
-  async refreshInBackground(from: string, to: string): Promise<void> {
-    if (this.isRefreshing) return;
-    this.isRefreshing = true;
-    
-    try {
-      await this.refreshRate(from, to);
-    } catch (error) {
-      // Erreur silencieuse pour le rafraîchissement en arrière-plan
-      console.warn('Background refresh failed:', error);
-    } finally {
-      this.isRefreshing = false;
-    }
+  /** Un seul appel réseau à la fois par clé ; le résultat est stocké. */
+  private once(key: string, fetcher: () => Promise<StoredTable>): Promise<StoredTable> {
+    const pending = this.inflight.get(key);
+    if (pending) return pending;
+    const request = fetcher()
+      .then((table) => {
+        writeJson(key, table);
+        return table;
+      })
+      .finally(() => this.inflight.delete(key));
+    this.inflight.set(key, request);
+    return request;
   }
 
-  // Favoris
-  async getFavoriteCurrencies(): Promise<string[]> {
-    const data = STORAGE.getString(this.getFavoriteCurrenciesKey());
-    if (data) {
-      try {
-        return JSON.parse(data);
-      } catch (e) {
-        return [];
-      }
-    }
-    return [];
+  private async fetchEcb(base: string): Promise<StoredTable> {
+    const list = await frankfurterClient.getLatestRates(base);
+    return {
+      base,
+      date: list[0]?.date ?? new Date().toISOString().slice(0, 10),
+      fetchedAt: new Date().toISOString(),
+      rates: Object.fromEntries(list.map((r) => [r.quote, r.rate])),
+    };
   }
 
-  async addFavoriteCurrency(code: string): Promise<void> {
-    const favorites = await this.getFavoriteCurrencies();
-    if (!favorites.includes(code)) {
-      favorites.push(code);
-      STORAGE.set(this.getFavoriteCurrenciesKey(), JSON.stringify(favorites));
-    }
+  private async fetchAlt(): Promise<StoredTable> {
+    const table = await currencyApi.latest();
+    return { base: 'EUR', date: table.date, fetchedAt: new Date().toISOString(), rates: table.rates };
   }
 
-  async removeFavoriteCurrency(code: string): Promise<void> {
-    const favorites = await this.getFavoriteCurrencies();
-    const filtered = favorites.filter(c => c !== code);
-    STORAGE.set(this.getFavoriteCurrenciesKey(), JSON.stringify(filtered));
+  /** Taux alternatifs de la veille de `date` (pour la variation), mis en cache. */
+  private async getAltPrevious(date: string): Promise<AltRateTable> {
+    const wanted = previousDay(date);
+    const cached = readJson<AltRateTable>(ALT_PREVIOUS_KEY);
+    if (cached?.date === wanted) return cached;
+    const table = await currencyApi.onDate(wanted);
+    writeJson(ALT_PREVIOUS_KEY, { ...table, date: wanted });
+    return table;
   }
 
-  async toggleFavoriteCurrency(code: string): Promise<boolean> {
-    const favorites = await this.getFavoriteCurrencies();
-    const isFavorite = favorites.includes(code);
-    
-    if (isFavorite) {
-      await this.removeFavoriteCurrency(code);
-      return false;
-    } else {
-      await this.addFavoriteCurrency(code);
-      return true;
-    }
+  /** Variation (%) entre la publication BCE `date` et la précédente, mise en cache par date. */
+  private async getEcbChange(base: string, quote: string, date: string): Promise<number | undefined> {
+    const key = `${CHANGE_PREFIX}${base}_${quote}`;
+    const cached = readJson<{ date: string; change: number }>(key);
+    if (cached?.date === date) return cached.change;
+
+    const end = new Date(`${date}T00:00:00Z`);
+    const start = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const history = await frankfurterClient.getHistoricalRates(base, quote, start.toISOString().slice(0, 10), date);
+    const sorted = history.filter((r) => r.date <= date).sort((a, b) => a.date.localeCompare(b.date));
+    if (sorted.length < 2) return undefined;
+    const last = sorted[sorted.length - 1].rate;
+    const previous = sorted[sorted.length - 2].rate;
+    const change = (last / previous - 1) * 100;
+    writeJson(key, { date, change });
+    return change;
   }
 
-  // Devises sélectionnées
-  async getSelectedSourceCurrency(): Promise<string | null> {
-    return STORAGE.getString(this.getSelectedSourceCurrencyKey()) || null;
-  }
-
-  async setSelectedSourceCurrency(code: string): Promise<void> {
-    STORAGE.set(this.getSelectedSourceCurrencyKey(), code);
-  }
-
-  async getSelectedTargetCurrency(): Promise<string | null> {
-    return STORAGE.getString(this.getSelectedTargetCurrencyKey()) || null;
-  }
-
-  async setSelectedTargetCurrency(code: string): Promise<void> {
-    STORAGE.set(this.getSelectedTargetCurrencyKey(), code);
-  }
-
-  // Nettoyage du cache
+  /** Supprime les taux stockés (préférences et devises conservées). */
   clearCache(): void {
-    const allKeys = STORAGE.getAllKeys();
-    allKeys.forEach(key => {
-      if (key.startsWith('rate_') || key.startsWith('rates_')) {
-        STORAGE.delete(key);
+    for (const key of storage.getAllKeys()) {
+      if (
+        key.startsWith(RATES_PREFIX) ||
+        key.startsWith(CHANGE_PREFIX) ||
+        key.startsWith(LEGACY_PREFIX) ||
+        key === ALT_KEY ||
+        key === ALT_PREVIOUS_KEY
+      ) {
+        storage.remove(key);
       }
-    });
-  }
-
-  clearAllData(): void {
-    STORAGE.clearAll();
+    }
+    frankfurterClient.clearCache();
   }
 }
 

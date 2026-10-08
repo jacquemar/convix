@@ -1,20 +1,40 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useEffect } from 'react';
+import * as SplashScreen from 'expo-splash-screen';
+import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { ThemeProvider, useAppFonts, useTheme } from './src/theme';
+import { RootTabs } from './src/navigation/RootTabs';
 
-export default function App() {
+// Le splash reste affiché jusqu'au chargement des polices (pas de saut de typographie).
+SplashScreen.preventAutoHideAsync().catch(() => undefined);
+
+function Root() {
+  const { colors } = useTheme();
+  const navigationTheme = {
+    ...DefaultTheme,
+    colors: { ...DefaultTheme.colors, background: colors.heroBase, card: colors.panel, text: colors.ink, primary: colors.violet },
+  };
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <NavigationContainer theme={navigationTheme}>
+      <RootTabs />
+    </NavigationContainer>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
+export default function App() {
+  const fontsReady = useAppFonts();
+
+  useEffect(() => {
+    if (fontsReady) SplashScreen.hideAsync().catch(() => undefined);
+  }, [fontsReady]);
+
+  if (!fontsReady) return null;
+
+  return (
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <Root />
+      </ThemeProvider>
+    </SafeAreaProvider>
+  );
+}

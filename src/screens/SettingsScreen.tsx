@@ -1,365 +1,142 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  SafeAreaView,
-  ActivityIndicator,
-  Alert,
-  Platform,
-  Switch,
-  ScrollView,
-} from 'react-native';
-import { useColorScheme } from 'react-native';
-import { Appearance, AppearancePreferences } from 'react-native';
-import { Currency, SUPPORTED_CURRENCIES } from '../types/currency';
+import React, { useState } from 'react';
+import { Pressable, ScrollView, Switch, View } from 'react-native';
+import Constants from 'expo-constants';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AppHeader, Button, Divider, HeroCard, Icon, SectionTitle, Sheet } from '../components/ui';
+import { FocusStatusBar } from '../components/FocusStatusBar';
 import { currencyService } from '../services/currency.service';
+import { pair } from '../services/my-currencies';
+import type { ThemePreference } from '../storage/preferences';
+import { space, Text, useTheme } from '../theme';
+import { formatTime } from '../utils/amount';
+import { fr } from '../i18n/fr';
 
-export const SettingsScreen: React.FC = () => {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
-  
-  const [defaultCurrency, setDefaultCurrency] = useState<string>('USD');
-  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
-  const [isClearingCache, setIsClearingCache] = useState<boolean>(false);
+const THEMES: { value: ThemePreference; label: string; hint?: string }[] = [
+  { value: 'system', label: fr.settings.themeSystem, hint: fr.settings.themeSystemHint },
+  { value: 'night', label: fr.settings.themeNight },
+  { value: 'day', label: fr.settings.themeDay },
+];
 
-  const loadSettings = async () => {
+export function SettingsScreen() {
+  const { colors, preference, setPreference, hapticsEnabled, setHapticsEnabled } = useTheme();
+  const insets = useSafeAreaInsets();
+  const [refreshing, setRefreshing] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    setMessage(null);
     try {
-      const savedCurrency = await currencyService.getSelectedSourceCurrency();
-      if (savedCurrency) {
-        setDefaultCurrency(savedCurrency);
-      }
-
-      // Récupérer le thème depuis AsyncStorage ou MMKV
-      // Pour simplifier, on utilise 'system' par défaut
-      setTheme('system');
-    } catch (err) {
-      console.error('Erreur chargement paramètres:', err);
-    }
-  };
-
-  useEffect(() => {
-    loadSettings();
-  }, []);
-
-  const handleCurrencyChange = async (code: string) => {
-    setDefaultCurrency(code);
-    await currencyService.setSelectedSourceCurrency(code);
-  };
-
-  const handleThemeChange = async (newTheme: 'light' | 'dark' | 'system') => {
-    setTheme(newTheme);
-    try {
-      await AppearancePreferences.setColorScheme(newTheme);
-    } catch (err) {
-      console.error('Erreur changement thème:', err);
-    }
-  };
-
-  const handleClearCache = async () => {
-    try {
-      setIsClearingCache(true);
-      currencyService.clearCache();
-      Alert.alert('Cache effacé', 'Le cache des taux de change a été vidé.');
-    } catch (err) {
-      console.error('Erreur vidage cache:', err);
-      Alert.alert('Erreur', 'Impossible de vider le cache.');
+      await Promise.all(pair.get().map((code) => currencyService.refresh(code)));
+      setMessage(fr.settings.refreshDone(formatTime(new Date().toISOString())));
+    } catch (error) {
+      console.error(error);
+      setMessage(fr.settings.refreshFailed);
     } finally {
-      setIsClearingCache(false);
+      setRefreshing(false);
     }
   };
 
-  const renderSection = (title: string, children: React.ReactNode) => (
-    <View style={[styles.section, { backgroundColor: isDark ? '#2a2a2a' : '#fff' }]}>
-      <Text style={[styles.sectionTitle, { color: isDark ? '#aaa' : '#666' }]}>{title}</Text>
-      {children}
-    </View>
-  );
-
-  const renderSettingItem = (
-    label: string,
-    value: string,
-    onPress: () => void,
-    subtitle?: string
-  ) => (
-    <TouchableOpacity
-      style={styles.settingItem}
-      onPress={onPress}
-    >
-      <View style={styles.settingItemLeft}>
-        <Text style={[styles.settingLabel, { color: isDark ? '#fff' : '#000' }]}>{label}</Text>
-        {subtitle && (
-          <Text style={[styles.settingSubtitle, { color: isDark ? '#888' : '#888' }]}>{subtitle}</Text>
-        )}
-      </View>
-      <Text style={[styles.settingValue, { color: isDark ? '#007AFF' : '#007AFF' }]}>{value}</Text>
-    </TouchableOpacity>
-  );
-
-  const renderThemeOption = (label: string, value: 'light' | 'dark' | 'system') => (
-    <TouchableOpacity
-      style={[
-        styles.themeOption,
-        theme === value && styles.themeOptionSelected,
-        { backgroundColor: isDark ? '#2a2a2a' : '#fff' }
-      ]}
-      onPress={() => handleThemeChange(value)}
-    >
-      <Text style={[
-        styles.themeOptionLabel,
-        theme === value ? { color: '#007AFF', fontWeight: '700' } : { color: isDark ? '#fff' : '#000' }
-      ]}>
-        {label}
-        {theme === value && ' ✓'}
-      </Text>
-    </TouchableOpacity>
-  );
-
-  const renderCurrencyOption = (currency: Currency) => (
-    <TouchableOpacity
-      style={[
-        styles.currencyOption,
-        defaultCurrency === currency.code && styles.currencyOptionSelected,
-        { backgroundColor: isDark ? '#2a2a2a' : '#fff' }
-      ]}
-      onPress={() => handleCurrencyChange(currency.code)}
-    >
-      <View style={styles.currencyOptionLeft}>
-        <Text style={styles.flag}>{currency.flag}</Text>
-        <View>
-          <Text style={[
-            styles.currencyOptionCode,
-            defaultCurrency === currency.code ? { color: '#007AFF', fontWeight: '700' } : { color: isDark ? '#fff' : '#000' }
-          ]}>
-            {currency.code}
-          </Text>
-          <Text style={[
-            styles.currencyOptionName,
-            { color: isDark ? '#aaa' : '#666' }
-          ]}>
-            {currency.name}
-          </Text>
-        </View>
-      </View>
-      {defaultCurrency === currency.code && (
-        <Text style={styles.checkMark}>✓</Text>
-      )}
-    </TouchableOpacity>
-  );
+  const clearCache = () => {
+    currencyService.clearCache();
+    setMessage(fr.settings.cacheCleared);
+  };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#1a1a1a' : '#fff' }]}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={[styles.header, { backgroundColor: isDark ? '#2a2a2a' : '#f5f5f5' }]}>
-          <Text style={[styles.title, { color: isDark ? '#fff' : '#000' }]}>⚙️ Paramètres</Text>
-        </View>
-
-        {/* Devise par défaut */}
-        <renderSection title="DEVISE">
-          {SUPPORTED_CURRENCIES.map(currency => (
-            <renderCurrencyOption key={currency.code} currency={currency} />
-          ))}
-        </renderSection>
-
-        {/* Thème */}
-        <renderSection title="APPARENCE">
-          <View style={styles.themeOptions}>
-            {[
-              { label: '☀️ Clair', value: 'light' as const },
-              { label: '🌙 Sombre', value: 'dark' as const },
-              { label: '📱 Système', value: 'system' as const },
-            ].map(opt => (
-              <renderThemeOption key={opt.value} label={opt.label} value={opt.value} />
+    <View style={{ flex: 1, backgroundColor: colors.heroBase }}>
+      <FocusStatusBar style="light" />
+      <HeroCard flat style={{ paddingTop: insets.top + space[4], paddingBottom: space[4] }}>
+        <AppHeader subtitle={fr.settings.subtitle} />
+      </HeroCard>
+      <Sheet>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: space[6], paddingBottom: space[12] }}>
+          <SectionTitle first>{fr.settings.appearance}</SectionTitle>
+          <View accessibilityRole="radiogroup">
+            {THEMES.map((option) => (
+              <Choice
+                key={option.value}
+                label={option.label}
+                hint={option.hint}
+                selected={preference === option.value}
+                onPress={() => setPreference(option.value)}
+              />
             ))}
           </View>
-        </renderSection>
 
-        {/* Données */}
-        <renderSection title="DONNÉES">
-          <TouchableOpacity
-            style={[styles.settingItem, { backgroundColor: isDark ? '#2a2a2a' : '#fff' }]}
-            onPress={handleClearCache}
-            disabled={isClearingCache}
-          >
-            <View style={styles.settingItemLeft}>
-              <Text style={[styles.settingLabel, { color: isDark ? '#fff' : '#000' }]}>Effacer le cache</Text>
-              <Text style={[styles.settingSubtitle, { color: isDark ? '#888' : '#888' }]}>
-                Supprime les taux de change stockés localement
+          <Divider />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space[4], minHeight: 60 }}>
+            <View style={{ flex: 1 }}>
+              <Text>{fr.settings.feedback}</Text>
+              <Text variant="text-caption" color="inkMuted">
+                {fr.settings.feedbackHint}
               </Text>
             </View>
-            {isClearingCache ? (
-              <ActivityIndicator size="small" color="#007AFF" />
-            ) : (
-              <Text style={[styles.settingValue, { color: '#FF3B30' }]}>Vider</Text>
-            )}
-          </TouchableOpacity>
+            <Switch
+              accessibilityLabel={fr.settings.feedback}
+              value={hapticsEnabled}
+              onValueChange={setHapticsEnabled}
+              trackColor={{ true: colors.violet, false: colors.lineStrong }}
+              thumbColor={colors.panel}
+              ios_backgroundColor={colors.lineStrong}
+            />
+          </View>
 
-          <TouchableOpacity
-            style={[styles.settingItem, { backgroundColor: isDark ? '#2a2a2a' : '#fff' }]}
-            onPress={async () => {
-              try {
-                await currencyService.getAllRates(defaultCurrency);
-                Alert.alert('Succès', 'Les taux ont été actualisés.');
-              } catch (err) {
-                Alert.alert('Erreur', 'Impossible d\'actualiser les taux.');
-              }
-            }}
-          >
-            <View style={styles.settingItemLeft}>
-              <Text style={[styles.settingLabel, { color: isDark ? '#fff' : '#000' }]}>Actualiser les taux</Text>
-              <Text style={[styles.settingSubtitle, { color: isDark ? '#888' : '#888' }]}>
-                Récupère les derniers taux depuis l'API
+          <Divider />
+          <SectionTitle first>{fr.settings.data}</SectionTitle>
+          <View style={{ gap: space[3] }}>
+            <Button label={fr.settings.refresh} variant="secondary" icon="refresh" block loading={refreshing} onPress={refresh} />
+            <Button label={fr.settings.clearCache} variant="ghost" block onPress={clearCache} />
+            {message ? (
+              <Text variant="text-caption" color="inkMuted" accessibilityLiveRegion="polite" style={{ textAlign: 'center' }}>
+                {message}
               </Text>
-            </View>
-            <Text style={[styles.settingValue, { color: isDark ? '#007AFF' : '#007AFF' }]}>🔄</Text>
-          </TouchableOpacity>
-        </renderSection>
+            ) : null}
+          </View>
 
-        {/* À propos */}
-        <renderSection title="À PROPOS">
-          <View style={styles.aboutItem}>
-            <Text style={[styles.aboutLabel, { color: isDark ? '#fff' : '#000' }]}>Version</Text>
-            <Text style={[styles.aboutValue, { color: isDark ? '#aaa' : '#666' }]}>1.0.0</Text>
-          </View>
-          <View style={styles.aboutItem}>
-            <Text style={[styles.aboutLabel, { color: isDark ? '#fff' : '#000' }]}>API de taux</Text>
-            <Text style={[styles.aboutValue, { color: isDark ? '#aaa' : '#666' }]}>Frankfurter API</Text>
-          </View>
-          <View style={styles.aboutItem}>
-            <Text style={[styles.aboutLabel, { color: isDark ? '#fff' : '#000' }]}>Confidentialité</Text>
-            <Text style={[styles.aboutValue, { color: isDark ? '#007AFF' : '#007AFF' }]}>Aucune donnée personnelle collectée</Text>
-          </View>
-        </renderSection>
-      </ScrollView>
-    </SafeAreaView>
+          <Divider />
+          <SectionTitle first>{fr.settings.about}</SectionTitle>
+          <Info label={fr.settings.version} value={Constants.expoConfig?.version ?? '—'} />
+          <Info label={fr.settings.source} value={fr.settings.sourceValue} />
+          <Info label={fr.settings.altSource} value={fr.settings.altSourceValue} />
+          <Info label={fr.settings.cfa} value={fr.settings.cfaValue} />
+          <Info label={fr.settings.privacy} value={fr.settings.privacyValue} />
+        </ScrollView>
+      </Sheet>
+    </View>
   );
-};
+}
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 40,
-    gap: 24,
-  },
-  header: {
-    paddingVertical: 20,
-    paddingHorizontal: 0,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  section: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  sectionTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
-  },
-  settingItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-  },
-  settingItemLeft: {
-    flex: 1,
-  },
-  settingLabel: {
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  settingSubtitle: {
-    fontSize: 12,
-    marginTop: 2,
-  },
-  settingValue: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  themeOptions: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    padding: 8,
-  },
-  themeOption: {
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: '#eee',
-  },
-  themeOptionSelected: {
-    borderColor: '#007AFF',
-    backgroundColor: 'rgba(0,122,255,0.1)',
-  },
-  themeOptionLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  currencyOption: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-  },
-  currencyOptionSelected: {
-    backgroundColor: 'rgba(0,122,255,0.05)',
-  },
-  currencyOptionLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  currencyOptionCode: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  currencyOptionName: {
-    fontSize: 13,
-  },
-  flag: {
-    fontSize: 24,
-  },
-  checkMark: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#007AFF',
-  },
-  aboutItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-  },
-  aboutLabel: {
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  aboutValue: {
-    fontSize: 14,
-  },
-});
+function Choice({ label, hint, selected, onPress }: { label: string; hint?: string; selected: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityState={{ checked: selected }}
+      accessibilityLabel={hint ? `${label}, ${hint}` : label}
+      onPress={onPress}
+      style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: space[3], minHeight: 52, opacity: pressed ? 0.7 : 1 })}
+    >
+      <View style={{ flex: 1 }}>
+        <Text variant={selected ? 'text-strong' : 'text-body'} color={selected ? 'accent' : 'ink'}>
+          {label}
+        </Text>
+        {hint ? (
+          <Text variant="text-caption" color="inkMuted">
+            {hint}
+          </Text>
+        ) : null}
+      </View>
+      {selected && <Icon name="check" size={20} color="accent" />}
+    </Pressable>
+  );
+}
+
+function Info({ label, value }: { label: string; value: string }) {
+  return (
+    <View accessible style={{ flexDirection: 'row', justifyContent: 'space-between', gap: space[4], paddingVertical: space[3] }}>
+      <Text>{label}</Text>
+      <Text color="inkMuted" style={{ flexShrink: 1, textAlign: 'right' }}>
+        {value}
+      </Text>
+    </View>
+  );
+}
